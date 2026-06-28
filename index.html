@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>行星轨道模拟器 · 双指缩放修复</title>
+    <style>
+        :root {
+            --bg: #000010;
+            --panel-bg: rgba(10, 12, 28, 0.94);
+            --text: #d0d8e8;
+            --accent: #f0b040;
+            --accent2: #4da6ff;
+            --input-bg: rgba(20, 25, 50, 0.8);
+            --border: rgba(255, 255, 255, 0.12);
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#000008; font-family:sans-serif; overflow:hidden; height:100vh; width:100vw; touch-action:none; display:flex; }
+        #canvas-container { flex:1; position:relative; cursor:grab; touch-action: none; }
+        canvas { display:block; width:100%; height:100%; }
+        #sidebar { width:420px; min-width:420px; background:var(--panel-bg); color:var(--text); display:flex; flex-direction:column; z-index:50; box-shadow:0 8px 32px rgba(0,0,0,0.6); border-left:1px solid var(--border); overflow-y:auto; overflow-x:hidden; transition:transform 0.35s; }
+        #sidebar.collapsed { transform:translateX(100%); min-width:0; width:0; }
+        #sidebar-toggle { position:absolute; right:420px; top:18px; z-index:60; width:36px; height:36px; border-radius:50%; background:var(--panel-bg); border:1px solid var(--border); color:var(--text); cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; transition:right 0.35s; }
+        #sidebar-header { padding:16px 22px 12px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel-bg); z-index:5; }
+        #sidebar-header h2 { font-size:20px; color:#fff; }
+        #sidebar-content { padding:16px 18px; flex:1; display:flex; flex-direction:column; gap:14px; }
+        .section-label { font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:#7a8ba8; margin-bottom:-6px; font-weight:600; }
+        .global-controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+        .btn { padding:9px 16px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text); cursor:pointer; font-size:13px; font-weight:500; transition:all 0.2s; white-space:nowrap; display:flex; align-items:center; gap:6px; touch-action: manipulation; }
+        .btn:active { transform:scale(0.96); }
+        .toggle-btn { padding:6px 14px; border-radius:20px; background:rgba(30,35,55,0.9); border:1px solid rgba(255,255,255,0.2); cursor:pointer; font-weight:600; font-size:12px; color:#ccc; transition:all 0.2s; }
+        .toggle-btn.active { background:rgba(77,166,255,0.25); border-color:var(--accent2); color:#fff; }
+        .speed-slider { display:flex; align-items:center; gap:8px; flex:1; }
+        .speed-slider input[type="range"] { flex:1; accent-color:var(--accent2); }
+        #planet-list { display:flex; flex-direction:column; gap:8px; max-height:200px; overflow-y:auto; }
+        .card { background:rgba(18,22,40,0.7); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:10px 12px; cursor:pointer; transition:0.2s; position:relative; display:flex; align-items:center; gap:10px; }
+        .card.selected { border-color:var(--accent2); background:rgba(40,80,140,0.2); }
+        .card .info { flex:1; }
+        .card .name { font-weight:600; }
+        .card .stats { font-size:11px; color:#8899bb; }
+        .delete-btn { position:absolute; top:8px; right:10px; width:22px; height:22px; border-radius:50%; background:rgba(255,255,255,0.08); color:#999; border:none; cursor:pointer; font-size:12px; }
+        .card:hover .delete-btn { opacity:1; }
+        #edit-panel { background:rgba(15,18,35,0.8); border:1px solid var(--border); border-radius:10px; padding:14px; display:none; flex-direction:column; gap:10px; }
+        #edit-panel.active { display:flex; }
+        #edit-panel label { font-size:11px; color:#8899bb; display:flex; justify-content:space-between; }
+        .edit-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+        #trail-control { display:none; align-items:center; gap:10px; }
+        #trail-control.visible { display:flex; }
+        .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center; }
+        .modal.active { display:flex; }
+        .modal-content { background:rgba(20,25,50,0.95); border:1px solid var(--border); border-radius:12px; padding:20px; max-width:600px; width:90%; color:#ddd; }
+        .modal-content textarea { width:100%; height:150px; background:#000; color:#0f0; font-family:monospace; border:1px solid var(--border); border-radius:6px; padding:8px; }
+    </style>
+</head>
+<body>
+<div id="canvas-container">
+    <canvas id="main-canvas"></canvas>
+</div>
+<button id="sidebar-toggle" title="面板">☰</button>
+
+<div id="sidebar">
+    <div id="sidebar-header"><h2>☀️ 轨道模拟器</h2></div>
+    <div id="sidebar-content">
+        <span class="section-label">⏱ 全局控制</span>
+        <div class="global-controls">
+            <button class="btn" id="btn-pause">⏯️</button>
+            <div class="speed-slider"><span>🐢</span><input type="range" id="speed-slider" min="0.1" max="20" step="0.1" value="1"><span>🐇</span></div>
+            <span id="speed-label">1×</span>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="gravity-toggle" class="toggle-btn">🌌 行星引力：关</button>
+            <button id="collision-toggle" class="toggle-btn">💥 行星碰撞：关</button>
+            <button id="real-mode-toggle" class="toggle-btn">🌐 真实模式：关</button>
+        </div>
+        <div id="trail-control"><span>轨迹长度</span><input type="range" id="trail-slider" min="50" max="3000" value="1200" step="10"><span id="trail-length-label">1200</span></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" id="btn-add-planet">＋ 添加行星</button>
+            <button class="btn" id="btn-reset">↺ 重置</button>
+            <button class="btn" id="btn-export">📤 导出</button>
+            <button class="btn" id="btn-import">📥 导入</button>
+        </div>
+
+        <span class="section-label">🪐 行星列表</span>
+        <div id="planet-list"></div>
+
+        <div id="edit-panel">
+            <span class="section-label" id="edit-title">✏️ 编辑行星</span>
+            <label>名称 <input type="text" id="edit-name" placeholder="名称"></label>
+            <label>半长轴 (px) <span id="val-a">120</span></label>
+            <input type="range" id="edit-a" min="1" max="3000" value="120" step="1">
+            <label>偏心率 <span id="val-e">0.000</span></label>
+            <input type="range" id="edit-e" min="0" max="0.99" step="0.001" value="0">
+            <label>周期 <span id="val-period">1.5</span></label>
+            <input type="range" id="edit-period" min="0.1" max="80" step="0.1" value="1.5">
+            <label>方向 (°) <span id="val-angle">0</span></label>
+            <input type="range" id="edit-angle" min="0" max="360" step="1" value="0">
+            <div class="edit-row">
+                <label>颜色 <input type="color" id="edit-color" value="#88ccaa"></label>
+                <label>半径 <span id="val-size">5</span></label>
+                <input type="range" id="edit-size" min="1" max="60" step="0.5" value="5">
+            </div>
+            <label>质量 <span id="val-mass">10.0</span></label>
+            <input type="range" id="edit-mass" min="0.1" max="100000" step="0.1" value="10">
+            <div style="display:flex; gap:8px; margin-top:4px;">
+                <button class="btn" id="btn-apply">✓ 应用</button>
+                <button class="btn" id="btn-cancel-edit">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modal-export">
+    <div class="modal-content">
+        <h3>导出星系数据</h3>
+        <textarea id="export-text" readonly></textarea>
+        <button class="btn" id="btn-copy">复制</button>
+        <button class="btn" id="btn-download">下载</button>
+        <button class="btn" id="btn-close-export">关闭</button>
+    </div>
+</div>
+<div class="modal" id="modal-import">
+    <div class="modal-content">
+        <h3>导入星系数据</h3>
+        <textarea id="import-text" placeholder="粘贴JSON或加载文件"></textarea>
+        <input type="file" id="import-file" accept=".json" style="display:none;">
+        <button class="btn" id="btn-load-file">加载文件</button>
+        <button class="btn" id="btn-import-data">导入数据</button>
+        <button class="btn" id="btn-close-import">关闭</button>
+    </div>
+</div>
+
+<script>
+(function() {
+    // DOM 元素
+    const canvas = document.getElementById('main-canvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvas-container');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const planetListEl = document.getElementById('planet-list');
+    const editPanel = document.getElementById('edit-panel');
+    const btnPause = document.getElementById('btn-pause');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedLabel = document.getElementById('speed-label');
+    const gravityToggle = document.getElementById('gravity-toggle');
+    const collisionToggle = document.getElementById('collision-toggle');
+    const realModeToggle = document.getElementById('real-mode-toggle');
+    const trailControl = document.getElementById('trail-control');
+    const trailSlider = document.getElementById('trail-slider');
+    const trailLengthLabel = document.getElementById('trail-length-label');
+    const btnAddPlanet = document.getElementById('btn-add-planet');
+    const btnReset = document.getElementById('btn-reset');
+    const btnExport = document.getElementById('btn-export');
+    const btnImport = document.getElementById('btn-import');
+    const btnApply = document.getElementById('btn-apply');
+    const btnCancelEdit = document.getElementById('btn-cancel-edit');
+    const editName = document.getElementById('edit-name');
+    const editA = document.getElementById('edit-a');
+    const editE = document.getElementById('edit-e');
+    const editPeriod = document.getElementById('edit-period');
+    const editAngle = document.getElementById('edit-angle');
+    const editColor = document.getElementById('edit-color');
+    const editSize = document.getElementById('edit-size');
+    const editMass = document.getElementById('edit-mass');
+    const valA = document.getElementById('val-a');
+    const valE = document.getElementById('val-e');
+    const valPeriod = document.getElementById('val-period');
+    const valAngle = document.getElementById('val-angle');
+    const valSize = document.getElementById('val-size');
+    const valMass = document.getElementById('val-mass');
+    const modalExport = document.getElementById('modal-export');
+    const exportText = document.getElementById('export-text');
+    const modalImport = document.getElementById('modal-import');
+    const importText = document.getElementById('import-text');
+    const importFile = document.getElementById('import-file');
+
+    // 常量
+    const G = 1000;
+    const STAR_MASS = 50000;
+    let trailLength = 1200;
+    let planets = [];
+    let selectedId = null;
+    let isPaused = false, timeSpeed = 1.0, globalTime = 0;
+    let gravityEnabled = false, collisionEnabled = false, realMode = false;
+    let editingId = null;
+    let viewScale = 1.0, viewOffsetX = 0, viewOffsetY = 0;
+    let pointerDown = false, startX, startY, startOffX, startOffY, moved = false;
+
+    // 双指缩放状态
+    let pinchStartDistance = 0;
+    let pinchStartScale = 1;
+    let pinchStartOffsetX = 0, pinchStartOffsetY = 0;
+    let pinchCenterX = 0, pinchCenterY = 0;
+
+    function createDefaults() {
+        planets = [
+            { id:'mercury', name:'水星', semiMajorAxis:72, eccentricity:0.2056, period:0.62, angle:0, color:'#c8c8d0', size:3.5, mass:8, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'venus', name:'金星', semiMajorAxis:115, eccentricity:0.0068, period:1.2, angle:0, color:'#e8cda0', size:5.5, mass:12, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'earth', name:'地球', semiMajorAxis:160, eccentricity:0.0167, period:1.8, angle:0, color:'#6baeff', size:6, mass:15, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'mars', name:'火星', semiMajorAxis:215, eccentricity:0.0934, period:2.8, angle:0, color:'#e07050', size:4.5, mass:10, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'jupiter', name:'木星', semiMajorAxis:290, eccentricity:0.0484, period:4.5, angle:0, color:'#d4b896', size:10, mass:280, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'saturn', name:'土星', semiMajorAxis:380, eccentricity:0.0565, period:7.2, angle:0, color:'#e0c97f', size:9, mass:180, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'uranus', name:'天王星', semiMajorAxis:520, eccentricity:0.047, period:12, angle:0, color:'#7ec8e3', size:8, mass:90, meanAnomaly:Math.random()*Math.PI*2 },
+            { id:'neptune', name:'海王星', semiMajorAxis:650, eccentricity:0.009, period:18, angle:0, color:'#4b70dd', size:8, mass:85, meanAnomaly:Math.random()*Math.PI*2 }
+        ];
+        initAllNBody();
+    }
+
+    function generateId() { return 'p_'+Date.now()+'_'+Math.random().toString(36).slice(2,7); }
+    function clamp(v,min,max) { return Math.max(min,Math.min(max,v)); }
+    function rotate(x,y,deg) { const r=deg*Math.PI/180; return {x:x*Math.cos(r)-y*Math.sin(r), y:x*Math.sin(r)+y*Math.cos(r)}; }
+
+    function initNBody(body) {
+        const a = body.semiMajorAxis, e = Math.min(body.eccentricity, 0.99);
+        const M = body.meanAnomaly || 0;
+        let E = M;
+        for (let i=0; i<15; i++) { const d = (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E)); E -= d; if (Math.abs(d)<1e-6) break; }
+        const cosE=Math.cos(E), sinE=Math.sin(E);
+        const r = a * (1 - e*cosE);
+        const theta = Math.atan2(Math.sqrt(1-e*e)*sinE, cosE - e);
+        let pos = { x: r*Math.cos(theta), y: r*Math.sin(theta) };
+        const dist = Math.hypot(pos.x, pos.y);
+        const vMag = Math.sqrt(G * STAR_MASS * (2/dist - 1/a));
+        const angle = Math.atan2(pos.y, pos.x);
+        let vel = { x: -vMag * Math.sin(angle), y: vMag * Math.cos(angle) };
+        if (body.angle) { pos = rotate(pos.x, pos.y, body.angle); vel = rotate(vel.x, vel.y, body.angle); }
+        body.posX = pos.x; body.posY = pos.y;
+        body.velX = vel.x; body.velY = vel.y;
+        body.trail = [{ x: body.posX, y: body.posY }];
+    }
+    function initAllNBody() { planets.forEach(b => initNBody(b)); }
+    function shouldUseNBody() { return gravityEnabled || collisionEnabled || realMode; }
+
+    function integrateNBody(dt) {
+        const sub = 10, h = dt/sub;
+        for (let s=0; s<sub; s++) {
+            const acc = planets.map(() => ({ ax:0, ay:0 }));
+            for (let i=0; i<planets.length; i++) {
+                const pi = planets[i];
+                const dx = pi.posX, dy = pi.posY;
+                const distSq = dx*dx + dy*dy + 1e-6, dist = Math.sqrt(distSq);
+                const f = G * STAR_MASS / distSq;
+                acc[i].ax -= f * dx / dist;
+                acc[i].ay -= f * dy / dist;
+            }
+            if (gravityEnabled || realMode) {
+                for (let i=0; i<planets.length; i++) {
+                    for (let j=i+1; j<planets.length; j++) {
+                        const pi = planets[i], pj = planets[j];
+                        const dx = pi.posX - pj.posX, dy = pi.posY - pj.posY;
+                        const distSq = dx*dx + dy*dy + 1e-4, dist = Math.sqrt(distSq);
+                        const f = G / distSq;
+                        const fx = f * (pj.posX - pi.posX) / dist, fy = f * (pj.posY - pi.posY) / dist;
+                        acc[i].ax += fx * pj.mass; acc[i].ay += fy * pj.mass;
+                        acc[j].ax -= fx * pi.mass; acc[j].ay -= fy * pi.mass;
+                    }
+                }
+            }
+            for (let i=0; i<planets.length; i++) {
+                planets[i].velX += acc[i].ax * h;
+                planets[i].velY += acc[i].ay * h;
+                planets[i].posX += planets[i].velX * h;
+                planets[i].posY += planets[i].velY * h;
+            }
+        }
+        planets.forEach(p => {
+            if (!p.trail) p.trail = [];
+            p.trail.push({ x: p.posX, y: p.posY });
+            while (p.trail.length > trailLength) p.trail.shift();
+        });
+    }
+
+    function handleCollisions() {
+        if (!collisionEnabled) return;
+        const toRemove = new Set();
+        for (let i=0; i<planets.length; i++) {
+            for (let j=i+1; j<planets.length; j++) {
+                const p1 = planets[i], p2 = planets[j];
+                if (Math.hypot(p1.posX-p2.posX, p1.posY-p2.posY) < p1.size + p2.size) {
+                    const survivor = p1.mass >= p2.mass ? p1 : p2, victim = p1.mass >= p2.mass ? p2 : p1;
+                    survivor.mass += victim.mass;
+                    survivor.size = Math.sqrt(survivor.size**2 + victim.size**2);
+                    toRemove.add(victim.id);
+                }
+            }
+        }
+        if (toRemove.size) {
+            planets = planets.filter(p => !toRemove.has(p.id));
+            updatePlanetList();
+        }
+    }
+
+    function logicToScreen(lx, ly) {
+        const cx = canvas.width/2 + viewOffsetX, cy = canvas.height/2 + viewOffsetY;
+        return { x: cx + lx*viewScale, y: cy - ly*viewScale };
+    }
+    function screenToLogic(sx, sy) {
+        const cx = canvas.width/2 + viewOffsetX, cy = canvas.height/2 + viewOffsetY;
+        return { x: (sx - cx)/viewScale, y: (cy - sy)/viewScale };
+    }
+
+    function drawStarfield() {
+        const seed = 42; let s = seed;
+        const rng = () => { s = (s*16807+0)%2147483647; return (s-1)/2147483646; };
+        ctx.fillStyle = '#fff';
+        for (let i=0; i<350; i++) {
+            const sx = rng()*canvas.width, sy = rng()*canvas.height;
+            ctx.globalAlpha = clamp(0.3+rng()*0.7, 0.2, 1);
+            ctx.beginPath(); ctx.arc(sx, sy, rng()<0.08?1.5:0.8, 0, 2*Math.PI); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawOrbit(planet, alpha=1, isPreview=false) {
+        const a = planet.semiMajorAxis, e = Math.min(planet.eccentricity, 0.99);
+        if (a <= 0) return;
+        ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = planet.color; ctx.lineWidth = isPreview?1.5:1.2;
+        ctx.setLineDash(isPreview ? [5,5] : (shouldUseNBody() ? [] : [8,10]));
+        const b = a * Math.sqrt(1-e*e);
+        const angle = planet.angle || 0;
+        const centerRot = rotate(-a*e, 0, angle);
+        ctx.beginPath();
+        for (let th=0; th<=2*Math.PI; th+=0.02) {
+            const rx = a*Math.cos(th), ry = b*Math.sin(th);
+            const rot = rotate(rx, ry, angle);
+            const scr = logicToScreen(centerRot.x + rot.x, centerRot.y + rot.y);
+            th===0 ? ctx.moveTo(scr.x, scr.y) : ctx.lineTo(scr.x, scr.y);
+        }
+        ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    }
+
+    function drawBody(body, alpha=1, isPreview=false) {
+        let pos;
+        if (!isPreview && shouldUseNBody() && body.posX !== undefined) pos = { x: body.posX, y: body.posY };
+        else if (!isPreview) pos = getPlanetAnalyticPos(body, globalTime);
+        else { const st = getSafeInitState(body); pos = st.pos; }
+        const scr = logicToScreen(pos.x, pos.y);
+        const radius = body.size * viewScale;
+        ctx.save(); ctx.globalAlpha = alpha;
+        const halo = ctx.createRadialGradient(scr.x, scr.y, radius*0.3, scr.x, scr.y, radius*2.8);
+        halo.addColorStop(0, body.color.replace(')', ',0.5)').replace('rgb','rgba'));
+        halo.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(scr.x, scr.y, radius*2.8, 0, 2*Math.PI); ctx.fill();
+        const bodyGrad = ctx.createRadialGradient(scr.x-radius*0.25, scr.y-radius*0.25, radius*0.1, scr.x, scr.y, radius);
+        bodyGrad.addColorStop(0, '#fff'); bodyGrad.addColorStop(0.35, body.color); bodyGrad.addColorStop(1, 'rgba(0,0,0,0.6)');
+        ctx.fillStyle = bodyGrad; ctx.beginPath(); ctx.arc(scr.x, scr.y, radius, 0, 2*Math.PI); ctx.fill();
+        if (!isPreview && viewScale > 0.4) {
+            ctx.fillStyle = '#fff';
+            ctx.font = `${Math.max(10, 12*viewScale)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(body.name, scr.x, scr.y - radius - 10*viewScale);
+        }
+        ctx.restore();
+    }
+
+    function drawStarGlow() {
+        const scr = logicToScreen(0, 0);
+        const r = 22 * viewScale;
+        [{col:'255,200,100',a:0.1,rad:r*3}, {col:'255,240,200',a:0.2,rad:r*1.5}].forEach(h => {
+            const g = ctx.createRadialGradient(scr.x, scr.y, r*0.2, scr.x, scr.y, h.rad);
+            g.addColorStop(0, `rgba(${h.col},${h.a})`);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(scr.x, scr.y, h.rad, 0, 2*Math.PI); ctx.fill();
+        });
+        const core = ctx.createRadialGradient(scr.x, scr.y, 0, scr.x, scr.y, r*0.55);
+        core.addColorStop(0, '#fff'); core.addColorStop(0.6, '#ffdc8c'); core.addColorStop(1, 'rgba(255,180,60,0)');
+        ctx.fillStyle = core; ctx.beginPath(); ctx.arc(scr.x, scr.y, r*0.55, 0, 2*Math.PI); ctx.fill();
+    }
+
+    function getPlanetAnalyticPos(planet, time) {
+        const a = planet.semiMajorAxis, e = Math.min(planet.eccentricity, 0.99);
+        const M = (planet.meanAnomaly + (2*Math.PI)/planet.period*time) % (2*Math.PI);
+        let E = M;
+        for (let i=0; i<15; i++) { const d = (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E)); E -= d; if (Math.abs(d) < 1e-6) break; }
+        const cosE = Math.cos(E), sinE = Math.sin(E);
+        const r = a * (1 - e*cosE);
+        const theta = Math.atan2(Math.sqrt(1-e*e)*sinE, cosE - e);
+        let pos = { x: r*Math.cos(theta), y: r*Math.sin(theta) };
+        if (planet.angle) pos = rotate(pos.x, pos.y, planet.angle);
+        return pos;
+    }
+
+    function getSafeInitState(body) {
+        const a = body.semiMajorAxis, e = Math.min(body.eccentricity, 0.99);
+        const M = body.meanAnomaly || 0;
+        let E = M;
+        for (let i=0; i<15; i++) { const d = (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E)); E -= d; if (Math.abs(d) < 1e-6) break; }
+        const cosE = Math.cos(E), sinE = Math.sin(E);
+        const r = a * (1 - e*cosE);
+        const theta = Math.atan2(Math.sqrt(1-e*e)*sinE, cosE - e);
+        let pos = { x: r*Math.cos(theta), y: r*Math.sin(theta) };
+        if (body.angle) pos = rotate(pos.x, pos.y, body.angle);
+        return { pos };
+    }
+
+    function updatePlanetList() {
+        planetListEl.innerHTML = '';
+        planets.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'card' + (selectedId===p.id ? ' selected' : '');
+            card.innerHTML = `<div class="info"><div class="name">${p.name}</div><div class="stats">a:${p.semiMajorAxis} e:${p.eccentricity.toFixed(3)}</div></div><button class="delete-btn" data-id="${p.id}">×</button>`;
+            card.addEventListener('click', e => { if (!e.target.classList.contains('delete-btn')) selectPlanet(p.id); });
+            card.querySelector('.delete-btn').addEventListener('click', e => { e.stopPropagation(); deletePlanet(p.id); });
+            planetListEl.appendChild(card);
+        });
+    }
+
+    function selectPlanet(id) { selectedId = id; editingId = id; updateEditPanel(); updatePlanetList(); }
+    function deletePlanet(id) {
+        if (planets.length <= 1) return;
+        planets = planets.filter(p => p.id !== id);
+        if (selectedId === id) { selectedId = null; editingId = null; }
+        updatePlanetList();
+    }
+
+    function updateEditPanel() {
+        if (editingId) {
+            const body = planets.find(p => p.id === editingId);
+            if (body) {
+                editName.value = body.name;
+                editA.value = body.semiMajorAxis; editE.value = body.eccentricity; editPeriod.value = body.period;
+                editAngle.value = body.angle || 0;
+                editColor.value = body.color; editSize.value = body.size; editMass.value = body.mass;
+                valA.textContent = body.semiMajorAxis; valE.textContent = body.eccentricity.toFixed(3);
+                valPeriod.textContent = body.period.toFixed(1); valAngle.textContent = body.angle || 0;
+                valSize.textContent = body.size; valMass.textContent = body.mass.toFixed(1);
+                editPanel.classList.add('active');
+            }
+        } else if (editingId === null) {
+            editName.value = ''; editA.value = 120; editE.value = 0; editPeriod.value = 1.5; editAngle.value = 0;
+            editColor.value = '#88ccaa'; editSize.value = 5; editMass.value = 10;
+            valA.textContent = '120'; valE.textContent = '0.000'; valPeriod.textContent = '1.5'; valAngle.textContent = '0';
+            valSize.textContent = '5'; valMass.textContent = '10.0';
+            editPanel.classList.add('active');
+        }
+    }
+
+    function applyEdit() {
+        const data = {
+            name: editName.value.trim() || '未命名',
+            semiMajorAxis: parseFloat(editA.value) || 120,
+            eccentricity: Math.min(parseFloat(editE.value) || 0, 0.99),
+            period: parseFloat(editPeriod.value) || 1.5,
+            angle: parseFloat(editAngle.value) || 0,
+            color: editColor.value || '#88ccaa',
+            size: parseFloat(editSize.value) || 5,
+            mass: parseFloat(editMass.value) || 10
+        };
+        if (editingId && planets.find(p => p.id === editingId)) {
+            const body = planets.find(p => p.id === editingId);
+            Object.assign(body, data);
+            if (shouldUseNBody()) initNBody(body);
+        } else {
+            const newBody = { id: generateId(), ...data, meanAnomaly: Math.random() * Math.PI * 2 };
+            if (shouldUseNBody()) initNBody(newBody);
+            planets.push(newBody);
+            selectedId = newBody.id;
+        }
+        editPanel.classList.remove('active');
+        editingId = selectedId;
+        updatePlanetList();
+    }
+
+    function cancelEdit() { editPanel.classList.remove('active'); editingId = selectedId; }
+
+    function resetToDefault() {
+        createDefaults();
+        selectedId = null; editingId = null;
+        globalTime = 0; viewScale = 1; viewOffsetX = 0; viewOffsetY = 0;
+        updatePlanetList();
+    }
+
+    function toggleGravity() {
+        gravityEnabled = !gravityEnabled;
+        gravityToggle.textContent = gravityEnabled ? '🌌 行星引力：开' : '🌌 行星引力：关';
+        gravityToggle.classList.toggle('active', gravityEnabled);
+        trailControl.classList.toggle('visible', gravityEnabled);
+        if (shouldUseNBody()) initAllNBody(); else planets.forEach(p => delete p.trail);
+    }
+    function toggleCollision() {
+        collisionEnabled = !collisionEnabled;
+        collisionToggle.textContent = collisionEnabled ? '💥 行星碰撞：开' : '💥 行星碰撞：关';
+        collisionToggle.classList.toggle('active', collisionEnabled);
+        if (shouldUseNBody()) initAllNBody(); else planets.forEach(p => delete p.trail);
+    }
+    function toggleRealMode() {
+        realMode = !realMode;
+        realModeToggle.textContent = realMode ? '🌐 真实模式：开' : '🌐 真实模式：关';
+        realModeToggle.classList.toggle('active', realMode);
+        if (realMode) initAllNBody();
+    }
+
+    function exportData() {
+        return JSON.stringify({
+            planets: planets.map(p => ({...p, trail: undefined})),
+            settings: { gravityEnabled, collisionEnabled, realMode, timeSpeed, trailLength }
+        }, null, 2);
+    }
+    function importData(jsonStr) {
+        const data = JSON.parse(jsonStr);
+        if (data.planets) planets = data.planets.map(p => ({...p, meanAnomaly: p.meanAnomaly || Math.random()*Math.PI*2}));
+        if (data.settings) {
+            gravityEnabled = data.settings.gravityEnabled || false;
+            collisionEnabled = data.settings.collisionEnabled || false;
+            realMode = data.settings.realMode || false;
+            timeSpeed = data.settings.timeSpeed || 1;
+            trailLength = data.settings.trailLength || 1200;
+        }
+        initAllNBody();
+        updatePlanetList();
+    }
+
+    // 事件绑定
+    btnPause.addEventListener('click', () => { isPaused=!isPaused; btnPause.textContent=isPaused?'▶️':'⏯️'; });
+    speedSlider.addEventListener('input', () => { timeSpeed=+speedSlider.value; speedLabel.textContent=timeSpeed.toFixed(1)+'×'; });
+    gravityToggle.addEventListener('click', toggleGravity);
+    collisionToggle.addEventListener('click', toggleCollision);
+    realModeToggle.addEventListener('click', toggleRealMode);
+    trailSlider.addEventListener('input', () => { trailLength=+trailSlider.value; trailLengthLabel.textContent=trailLength; });
+    btnAddPlanet.addEventListener('click', () => { editingId = null; updateEditPanel(); });
+    btnReset.addEventListener('click', resetToDefault);
+    btnExport.addEventListener('click', () => { exportText.value = exportData(); modalExport.classList.add('active'); });
+    btnImport.addEventListener('click', () => { modalImport.classList.add('active'); });
+    btnApply.addEventListener('click', applyEdit);
+    btnCancelEdit.addEventListener('click', cancelEdit);
+    document.getElementById('btn-close-export').addEventListener('click', () => modalExport.classList.remove('active'));
+    document.getElementById('btn-close-import').addEventListener('click', () => modalImport.classList.remove('active'));
+    document.getElementById('btn-copy').addEventListener('click', () => { navigator.clipboard.writeText(exportText.value); });
+    document.getElementById('btn-download').addEventListener('click', () => { const b=new Blob([exportData()],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='galaxy.json'; a.click(); });
+    document.getElementById('btn-load-file').addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', e => { const f=e.target.files[0]; if(f){ const r=new FileReader(); r.onload=ev=>{ importText.value=ev.target.result; }; r.readAsText(f); } });
+    document.getElementById('btn-import-data').addEventListener('click', () => { try { importData(importText.value); modalImport.classList.remove('active'); } catch(ex) { alert('无效JSON'); } });
+
+    editA.addEventListener('input', () => valA.textContent=editA.value);
+    editE.addEventListener('input', () => valE.textContent=parseFloat(editE.value).toFixed(3));
+    editPeriod.addEventListener('input', () => valPeriod.textContent=parseFloat(editPeriod.value).toFixed(1));
+    editAngle.addEventListener('input', () => valAngle.textContent=editAngle.value);
+    editSize.addEventListener('input', () => valSize.textContent=editSize.value);
+    editMass.addEventListener('input', () => valMass.textContent=parseFloat(editMass.value).toFixed(1));
+
+    // 鼠标/单指交互
+    canvas.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        pointerDown = true; moved = false;
+        startX = e.clientX; startY = e.clientY;
+        startOffX = viewOffsetX; startOffY = viewOffsetY;
+        container.style.cursor = 'grabbing';
+        canvas.setPointerCapture(e.pointerId);
+    });
+    window.addEventListener('pointermove', e => {
+        if (!pointerDown) return;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (!moved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) moved = true;
+        if (moved) { viewOffsetX = startOffX + dx; viewOffsetY = startOffY + dy; }
+    });
+    window.addEventListener('pointerup', e => {
+        if (!pointerDown) return;
+        pointerDown = false;
+        container.style.cursor = 'grab';
+        canvas.releasePointerCapture(e.pointerId);
+        if (!moved) {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const logic = screenToLogic(mx, my);
+            let clicked = null, min = Infinity;
+            planets.forEach(b => {
+                const pos = (shouldUseNBody() && b.posX !== undefined) ? { x: b.posX, y: b.posY } : getPlanetAnalyticPos(b, globalTime);
+                const d = Math.hypot(logic.x - pos.x, logic.y - pos.y);
+                const r = b.size + 8;
+                if (d < r / viewScale && d < min) { min = d; clicked = b; }
+            });
+            if (clicked) selectPlanet(clicked.id);
+            else { selectedId = null; updatePlanetList(); }
+        }
+    });
+
+    // 双指缩放（修正Y方向）
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            pinchStartDistance = Math.hypot(dx, dy);
+            pinchStartScale = viewScale;
+            pinchStartOffsetX = viewOffsetX;
+            pinchStartOffsetY = viewOffsetY;
+            const rect = canvas.getBoundingClientRect();
+            pinchCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+            pinchCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const currentDist = Math.hypot(dx, dy);
+            const newScale = clamp(pinchStartScale * (currentDist / pinchStartDistance), 0.2, 4);
+            // 修正：根据双指中心保持逻辑坐标不变
+            const worldX = (pinchCenterX - canvas.width/2 - pinchStartOffsetX) / pinchStartScale;
+            const worldY = (canvas.height/2 + pinchStartOffsetY - pinchCenterY) / pinchStartScale;
+            viewScale = newScale;
+            viewOffsetX = pinchCenterX - canvas.width/2 - worldX * newScale;
+            viewOffsetY = pinchCenterY - canvas.height/2 + worldY * newScale; // 原错误：canvas.height/2 - pinchCenterY - worldY * newScale
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const old = viewScale;
+        viewScale = e.deltaY < 0 ? Math.min(viewScale * 1.08, 4) : Math.max(viewScale / 1.08, 0.2);
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        const wx = (cx - canvas.width / 2 - viewOffsetX) / old;
+        const wy = (canvas.height / 2 + viewOffsetY - cy) / old;
+        viewOffsetX = cx - canvas.width / 2 - wx * viewScale;
+        viewOffsetY = canvas.height / 2 - cy - wy * viewScale;
+    }, { passive: false });
+    canvas.addEventListener('dblclick', () => { viewScale = 1; viewOffsetX = 0; viewOffsetY = 0; });
+
+    sidebarToggle.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
+
+    function render() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const rect = container.getBoundingClientRect();
+        if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+            canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px'; canvas.style.height = rect.height + 'px';
+            ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr);
+        }
+        ctx.fillStyle = '#000008'; ctx.fillRect(0, 0, rect.width, rect.height);
+        drawStarfield();
+
+        const dt = 0.016 * timeSpeed;
+        if (!isPaused) {
+            if (shouldUseNBody()) { integrateNBody(dt); handleCollisions(); }
+            globalTime += dt;
+        }
+
+        planets.forEach(p => {
+            if (shouldUseNBody() && p.trail && p.trail.length > 1) {
+                ctx.save(); ctx.strokeStyle = p.color; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.2; ctx.beginPath();
+                const first = logicToScreen(p.trail[0].x, p.trail[0].y); ctx.moveTo(first.x, first.y);
+                for (let i = 1; i < p.trail.length; i++) { const pt = logicToScreen(p.trail[i].x, p.trail[i].y); ctx.lineTo(pt.x, pt.y); }
+                ctx.stroke(); ctx.restore();
+            } else { drawOrbit(p, 0.45); }
+        });
+
+        drawStarGlow();
+        ctx.save(); ctx.fillStyle = '#ffdd88'; ctx.beginPath(); ctx.arc(canvas.width/2 + viewOffsetX, canvas.height/2 + viewOffsetY, 22 * viewScale, 0, 2*Math.PI); ctx.fill(); ctx.restore();
+        planets.forEach(b => drawBody(b, 1, false));
+
+        if (editPanel.classList.contains('active')) {
+            const preview = {
+                name: editName.value.trim() || '预览',
+                semiMajorAxis: parseFloat(editA.value) || 120,
+                eccentricity: Math.min(parseFloat(editE.value) || 0, 0.99),
+                period: parseFloat(editPeriod.value) || 1.5,
+                angle: parseFloat(editAngle.value) || 0,
+                color: editColor.value || '#88ccaa',
+                size: parseFloat(editSize.value) || 5,
+                mass: parseFloat(editMass.value) || 10
+            };
+            drawOrbit(preview, 0.4, true);
+            drawBody(preview, 0.5, true);
+        }
+
+        requestAnimationFrame(render);
+    }
+
+    createDefaults();
+    viewOffsetX = 0; viewOffsetY = 0;
+    updatePlanetList();
+    requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
