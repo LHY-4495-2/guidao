@@ -15,36 +15,24 @@
 ## 制作人员与其他平台
 制作人员：Deepseek  
 bilibili:不知叫某亻
+在线体验：https://lhy-4495-2.github.io/guidao/
 
+  
 # English ：
 # Track Simulator
-
 ## Existing functions (1.0 )
-
-The track simulator is a software that can simulate the track, which can make the following settings
-
-• Set/create a planet
-
-• Edit his data (half-long axis/eccentricity/radius/mass/color, etc.)
-
-• It can create gravity between the planets.
-
-• It can cause collisions between planets.
-
-• Can export/import archive
-
-• There is a preview when editing the planet
-
-•......
-
-Version 1.2 has been released (as of July 11, 2026)
-
-## Future plan
-
-Not for the time being
-
-## Producers and other platforms
-
-Producer: Deepseek
-
-Bilibili:不知叫某亻
+The track simulator is a software that can simulate the track, which can make the following settings  
+• Set/create a planet  
+• Edit his data (half-long axis/eccentricity/radius/mass/color, etc.)  
+• It can create gravity between the planets.  
+• It can cause collisions between planets.  
+• Can export/import archive  
+• There is a preview when editing the planet  
+•......  
+Version 1.2 has been released (as of July 11, 2026)  
+## Future plan  
+Not for the time being  
+## Producers and other platforms  
+Producer: Deepseek  
+Bilibili:不知叫某亻  
+Online experience：https://lhy-4495-2.github.io/guidao/
